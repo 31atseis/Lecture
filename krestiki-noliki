@@ -1,0 +1,314 @@
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_SIZE 20
+
+/* Читает целое число в отдельной строке; при ошибке просит повторить ввод. */
+int readInteger(const char *prompt, int *value)
+{
+    char input[128];
+
+    while (1) {
+        char *end;
+        long parsedValue;
+        size_t length;
+
+        printf("%s", prompt);
+
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            return 0;
+        }
+
+        length = strlen(input);
+        if (length > 0 && input[length - 1] != '\n' && !feof(stdin)) {
+            int character;
+
+            while ((character = getchar()) != '\n' && character != EOF) {
+                /* Удаляем остаток слишком длинной строки. */
+            }
+            printf("Ввод слишком длинный. Попробуйте ещё раз.\n");
+            continue;
+        }
+
+        errno = 0;
+        parsedValue = strtol(input, &end, 10);
+
+        if (end == input) {
+            printf("Введите целое число.\n");
+            continue;
+        }
+
+        while (isspace((unsigned char)*end)) {
+            end++;
+        }
+
+        if (*end != '\0' || errno == ERANGE || parsedValue < INT_MIN
+            || parsedValue > INT_MAX) {
+            printf("Введите целое число.\n");
+            continue;
+        }
+
+        *value = (int)parsedValue;
+        return 1;
+    }
+}
+
+/* Запрашивает размер поля и проверяет, что он помещается в массив. */
+int readDimension(const char *prompt, int *dimension)
+{
+    while (1) {
+        if (!readInteger(prompt, dimension)) {
+            return 0;
+        }
+
+        if (*dimension >= 1 && *dimension <= MAX_SIZE) {
+            return 1;
+        }
+
+        printf("Размер должен быть от 1 до %d.\n", MAX_SIZE);
+    }
+}
+
+/* Заполняет игровое поле пробелами. */
+void initializeBoard(char board[MAX_SIZE][MAX_SIZE], int rows, int cols)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < rows; row++) {
+        for (col = 0; col < cols; col++) {
+            board[row][col] = ' ';
+        }
+    }
+}
+
+/* Печатает поле с нумерацией строк и столбцов с единицы. */
+void printBoard(char board[MAX_SIZE][MAX_SIZE], int rows, int cols)
+{
+    int row;
+    int col;
+
+    printf("\n   ");
+    for (col = 0; col < cols; col++) {
+        printf("%3d", col + 1);
+    }
+    printf("\n");
+
+    for (row = 0; row < rows; row++) {
+        printf("%2d ", row + 1);
+        for (col = 0; col < cols; col++) {
+            printf("| %c ", board[row][col]);
+        }
+        printf("|\n");
+
+        printf("   ");
+        for (col = 0; col < cols; col++) {
+            printf("+---");
+        }
+        printf("+\n");
+    }
+}
+
+/* Считывает координаты хода и переводит их в индексы массива. */
+int getMove(int player, int rows, int cols, int *row, int *col)
+{
+    int enteredRow;
+    int enteredCol;
+    char prompt[100];
+
+    printf("\nХод игрока %d (%c).\n", player, player == 1 ? 'X' : 'O');
+
+    snprintf(prompt, sizeof(prompt), "Номер строки (1..%d): ", rows);
+    if (!readInteger(prompt, &enteredRow)) {
+        return 0;
+    }
+
+    snprintf(prompt, sizeof(prompt), "Номер столбца (1..%d): ", cols);
+    if (!readInteger(prompt, &enteredCol)) {
+        return 0;
+    }
+
+    *row = enteredRow - 1;
+    *col = enteredCol - 1;
+    return 1;
+}
+
+/* Проверяет границы поля и то, что выбранная клетка свободна. */
+int checkMove(char board[MAX_SIZE][MAX_SIZE], int rows, int cols,
+              int row, int col)
+{
+    if (row < 0 || row >= rows || col < 0 || col >= cols) {
+        return 0;
+    }
+
+    return board[row][col] == ' ';
+}
+
+/* Записывает символ игрока в выбранную клетку. */
+void makeMove(char board[MAX_SIZE][MAX_SIZE], int row, int col, char symbol)
+{
+    board[row][col] = symbol;
+}
+
+int isInsideBoard(int row, int col, int rows, int cols)
+{
+    return row >= 0 && row < rows && col >= 0 && col < cols;
+}
+
+/* Проверяет, заполнена ли символом игрока диагональ от края до края. */
+int checkDiagonal(char board[MAX_SIZE][MAX_SIZE], int rows, int cols,
+                  int startRow, int startCol, int rowStep, int colStep,
+                  char symbol)
+{
+    int previousRow = startRow - rowStep;
+    int previousCol = startCol - colStep;
+    int row = startRow;
+    int col = startCol;
+    int length = 0;
+
+    if (isInsideBoard(previousRow, previousCol, rows, cols)) {
+        return 0;
+    }
+
+    while (isInsideBoard(row, col, rows, cols)
+           && board[row][col] == symbol) {
+        length++;
+        row += rowStep;
+        col += colStep;
+    }
+
+    return length >= 2 && !isInsideBoard(row, col, rows, cols);
+}
+
+/* Ищет полные горизонтальные, вертикальные и диагональные линии. */
+int checkWin(char board[MAX_SIZE][MAX_SIZE], int rows, int cols,
+             char symbol)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < rows; row++) {
+        int filled = 1;
+
+        for (col = 0; col < cols; col++) {
+            if (board[row][col] != symbol) {
+                filled = 0;
+                break;
+            }
+        }
+
+        if (filled) {
+            return 1;
+        }
+    }
+
+    for (col = 0; col < cols; col++) {
+        int filled = 1;
+
+        for (row = 0; row < rows; row++) {
+            if (board[row][col] != symbol) {
+                filled = 0;
+                break;
+            }
+        }
+
+        if (filled) {
+            return 1;
+        }
+    }
+
+    for (row = 0; row < rows; row++) {
+        for (col = 0; col < cols; col++) {
+            if (board[row][col] == symbol
+                && (checkDiagonal(board, rows, cols, row, col, 1, 1, symbol)
+                    || checkDiagonal(board, rows, cols, row, col, 1, -1,
+                                     symbol))) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+/* Ничья наступает, если на поле больше нет пустых клеток. */
+int checkDraw(char board[MAX_SIZE][MAX_SIZE], int rows, int cols)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < rows; row++) {
+        for (col = 0; col < cols; col++) {
+            if (board[row][col] == ' ') {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+/* Меняет номер игрока на 1 или 2. */
+void switchPlayer(int *player)
+{
+    *player = (*player == 1) ? 2 : 1;
+}
+
+int main(void)
+{
+    char board[MAX_SIZE][MAX_SIZE];
+    int rows;
+    int cols;
+    int currentPlayer = 1;
+
+    printf("Крестики-нолики\n");
+
+    if (!readDimension("Введите количество строк (1..20): ", &rows)
+        || !readDimension("Введите количество столбцов (1..20): ", &cols)) {
+        printf("\nВвод завершён.\n");
+        return 0;
+    }
+
+    initializeBoard(board, rows, cols);
+    printBoard(board, rows, cols);
+
+    while (1) {
+        int row;
+        int col;
+        char symbol = currentPlayer == 1 ? 'X' : 'O';
+
+        while (1) {
+            if (!getMove(currentPlayer, rows, cols, &row, &col)) {
+                printf("\nВвод завершён. Игра остановлена.\n");
+                return 0;
+            }
+
+            if (checkMove(board, rows, cols, row, col)) {
+                break;
+            }
+
+            printf("Клетка недоступна: проверьте координаты и повторите ход.\n");
+        }
+
+        makeMove(board, row, col, symbol);
+        printBoard(board, rows, cols);
+
+        if (checkWin(board, rows, cols, symbol)) {
+            printf("Игрок %d (%c) победил!\n", currentPlayer, symbol);
+            break;
+        }
+
+        if (checkDraw(board, rows, cols)) {
+            printf("Ничья: свободных клеток не осталось.\n");
+            break;
+        }
+
+        switchPlayer(&currentPlayer);
+    }
+
+    return 0;
+}
